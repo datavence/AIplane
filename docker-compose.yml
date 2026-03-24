@@ -1,3 +1,5 @@
+# docker compose -f docker-compose.yml -f docker-compose.external-nginx.yml up -d --build
+
 services:
   web:
     container_name: web
@@ -151,16 +153,20 @@ services:
       MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID}
       MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY}
 
-  # Comment this if you already have a reverse proxy running
+  # Reverse proxy: Caddy needs SITE_ADDRESS, CERT_*, etc. from project .env (see .env.example).
+  # Default host ports 8080/8443 avoid binding privileged 80/443 on local Linux; override in .env.
+  # Open http://localhost:<LISTEN_HTTP_PORT> and set apps/api/.env WEB_URL / CORS to the same origin.
   proxy:
     container_name: proxy
     build:
       context: ./apps/proxy
       dockerfile: Dockerfile.ce
     restart: always
+    env_file:
+      - .env
     ports:
-      - ${LISTEN_HTTP_PORT}:80
-      - ${LISTEN_HTTPS_PORT}:443
+      - "${LISTEN_HTTP_PORT:-8080}:80"
+      - "${LISTEN_HTTPS_PORT:-8443}:443"
     environment:
       FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-5242880}
       BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-uploads}
@@ -169,6 +175,7 @@ services:
       - api
       - space
       - admin
+      - live
 
 volumes:
   pgdata:

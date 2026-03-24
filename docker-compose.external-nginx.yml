@@ -1,0 +1,38 @@
+# Optional overlay: same stack as docker-compose.yml but **no Plane Caddy proxy** and **host ports
+# matching a typical self-hosted + external nginx (TLS) setup (see docs/server-selfhosted-parity.md).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.external-nginx.yml up -d
+#
+# The `proxy` service is assigned profile `caddy` only in this file so it does not start when you
+# use this overlay. Use plain `docker compose -f docker-compose.yml up` for local single-origin
+# (Caddy on LISTEN_HTTP_PORT, default 8080).
+
+services:
+  web:
+    ports:
+      - "15000:3000"
+
+  space:
+    ports:
+      - "15001:3000"
+
+  admin:
+    ports:
+      - "15002:3000"
+
+  live:
+    ports:
+      - "15003:3000"
+
+  api:
+    ports:
+      - "15004:8000"
+
+  plane-minio:
+    ports:
+      - "15005:9000"
+      - "15006:9090"
+
+  proxy:
+    profiles:
+      - caddy
