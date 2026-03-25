@@ -13,7 +13,7 @@ export function PlaneLockup({ width = "253", height = "179", className, color = 
     <svg
       width={width}
       height={height}
-      viewBox="2898.5855728429983 7812 23944.837340876944 5586"
+      viewBox="2898 7812 23944 5586"
       fill={color}
       xmlns="http://www.w3.org/2000/svg"
       className={className}
