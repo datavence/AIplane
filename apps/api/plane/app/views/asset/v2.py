@@ -751,7 +751,8 @@ class DuplicateAssetEndpoint(BaseAPIView):
             if not Project.objects.filter(id=project_id, workspace=workspace).exists():
                 return Response({"error": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        storage = S3Storage(request=request)
+        # Use internal storage client for server-side copy operations.
+        storage = S3Storage()
         original_asset = FileAsset.objects.filter(id=asset_id, is_uploaded=True).first()
 
         if not original_asset:
@@ -773,7 +774,13 @@ class DuplicateAssetEndpoint(BaseAPIView):
             storage_metadata=original_asset.storage_metadata,
             **self.get_entity_id_field(entity_type=entity_type, entity_id=entity_id),
         )
-        storage.copy_object(original_asset.asset, destination_key)
+        copy_response = storage.copy_object(original_asset.asset, destination_key)
+        if not copy_response:
+            duplicated_asset.delete()
+            return Response(
+                {"error": "Asset duplication failed"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         # Update the is_uploaded field for all newly created assets
         FileAsset.objects.filter(id=duplicated_asset.id).update(is_uploaded=True)
 

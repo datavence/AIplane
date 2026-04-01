@@ -12,7 +12,7 @@ import { useParams } from "next/navigation";
 import { useTranslation } from "@plane/i18n";
 import { TOAST_TYPE, setToast } from "@plane/propel/toast";
 import type { TBaseIssue, TIssue } from "@plane/types";
-import { EIssuesStoreType } from "@plane/types";
+import { EFileAssetType, EIssuesStoreType } from "@plane/types";
 import { EModalPosition, EModalWidth, ModalCore } from "@plane/ui";
 // hooks
 import { useIssueModal } from "@/hooks/context/use-issue-modal";
@@ -25,7 +25,19 @@ import { useIssueStoreType } from "@/hooks/use-issue-layout-store";
 import { useIssuesActions } from "@/hooks/use-issues-actions";
 // services
 import { FileService } from "@/services/file.service";
+import { IssueAttachmentService, IssueCommentService } from "@/services/issue";
 const fileService = new FileService();
+const issueAttachmentService = new IssueAttachmentService();
+const issueCommentService = new IssueCommentService();
+
+const escapeHtml = (value: string): string =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+const formatCommentDate = (value: string): string => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().replace("T", " ").slice(0, 19);
+};
 // local imports
 import { CreateIssueToastActionItems } from "../create-issue-toast-action-items";
 import { DraftIssueLayout } from "./draft-issue-layout";
@@ -197,6 +209,78 @@ export const CreateUpdateIssueModalBase = observer(function CreateUpdateIssueMod
 
       if (!response) throw new Error();
 
+      // Copy attachments when issue is created via "Make a copy".
+      if (data?.sourceIssueId && data?.project_id && response.id && response.project_id) {
+        try {
+          const sourceAttachments = await issueAttachmentService.getIssueAttachments(
+            workspaceSlug.toString(),
+            data.project_id,
+            data.sourceIssueId
+          );
+          if (sourceAttachments.length > 0) {
+            const duplicateResults = await Promise.allSettled(
+              sourceAttachments.map((attachment) =>
+                fileService.duplicateAsset(workspaceSlug.toString(), attachment.id, {
+                  entity_id: response?.id,
+                  entity_type: EFileAssetType.ISSUE_ATTACHMENT,
+                  project_id: response?.project_id,
+                })
+              )
+            );
+            const failedDuplications = duplicateResults.filter((result) => result.status === "rejected");
+            if (failedDuplications.length > 0) {
+              console.error("Some attachments failed to copy while duplicating issue", failedDuplications);
+            }
+          }
+        } catch (error) {
+          console.error("Failed to copy attachments while duplicating issue", error);
+        }
+
+        // Copy comments when issue is created via "Make a copy".
+        try {
+          const targetProjectId = response.project_id;
+          const targetIssueId = response.id;
+          const sourceComments = await issueCommentService.getIssueComments(
+            workspaceSlug.toString(),
+            data.project_id,
+            data.sourceIssueId
+          );
+
+          // Keep chronology from oldest to newest.
+          const commentsInChronologicalOrder = [...sourceComments].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+
+          const commentResults = await Promise.allSettled(
+            commentsInChronologicalOrder.map((comment) => {
+              const originalActor =
+                comment.actor_detail?.display_name ||
+                `${comment.actor_detail?.first_name ?? ""} ${comment.actor_detail?.last_name ?? ""}`.trim() ||
+                comment.actor ||
+                "unknown user";
+              const createdAt = comment.created_at ? formatCommentDate(comment.created_at) : "unknown date";
+              const commentHtml = comment.comment_html || "<p></p>";
+
+              const prefixedCommentHtml = `<p><em>Originally by ${escapeHtml(originalActor)} on ${escapeHtml(
+                createdAt
+              )}:</em></p>${commentHtml}`;
+
+              return issueCommentService.createIssueComment(workspaceSlug.toString(), targetProjectId, targetIssueId, {
+                comment_html: prefixedCommentHtml,
+                access: comment.access,
+              });
+            })
+          );
+
+          const failedCommentCopies = commentResults.filter((result) => result.status === "rejected");
+          if (failedCommentCopies.length > 0) {
+            console.error("Some comments failed to copy while duplicating issue", failedCommentCopies);
+          }
+        } catch (error) {
+          console.error("Failed to copy comments while duplicating issue", error);
+        }
+      }
+
       // check if we should add issue to cycle/module
       if (!is_draft_issue) {
         if (
@@ -336,15 +420,17 @@ export const CreateUpdateIssueModalBase = observer(function CreateUpdateIssueMod
 
   const handleFormSubmit = async (payload: Partial<TIssue>, is_draft_issue: boolean = false) => {
     if (!workspaceSlug || !payload.project_id || !storeType) return;
-    // remove sourceIssueId from payload since it is not needed
-    if (data?.sourceIssueId) delete data.sourceIssueId;
+
+    // Do not mutate `data`; remove copy-only field from outgoing payload.
+    const submitPayload = { ...payload } as Partial<TIssue> & { sourceIssueId?: string };
+    if (submitPayload.sourceIssueId) delete submitPayload.sourceIssueId;
 
     let response: TIssue | undefined = undefined;
 
     try {
       if (beforeFormSubmit) await beforeFormSubmit();
-      if (!data?.id) response = await handleCreateIssue(payload, is_draft_issue);
-      else response = await handleUpdateIssue(payload);
+      if (!data?.id) response = await handleCreateIssue(submitPayload, is_draft_issue);
+      else response = await handleUpdateIssue(submitPayload);
     } finally {
       if (response != undefined && onSubmit) await onSubmit(response);
     }

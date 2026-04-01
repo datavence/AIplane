@@ -93,7 +93,7 @@ class S3Storage(S3Boto3Storage):
             )
         # Handle errors
         except ClientError as e:
-            print(f"Error generating presigned POST URL: {e}")
+            log_exception(e)
             return None
 
         return response
@@ -158,12 +158,17 @@ class S3Storage(S3Boto3Storage):
     def copy_object(self, object_name, new_object_name):
         """Copy an S3 object to a new location"""
         try:
+            source_key = str(object_name)
+            destination_key = str(new_object_name)
             response = self.s3_client.copy_object(
                 Bucket=self.aws_storage_bucket_name,
-                CopySource={"Bucket": self.aws_storage_bucket_name, "Key": object_name},
-                Key=new_object_name,
+                CopySource={"Bucket": self.aws_storage_bucket_name, "Key": source_key},
+                Key=destination_key,
             )
         except ClientError as e:
+            log_exception(e)
+            return None
+        except Exception as e:
             log_exception(e)
             return None
 
